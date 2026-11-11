@@ -1,0 +1,6 @@
+{
+  "name": "Petualangan Kuis Nusantara",
+  "description": "Game edukasi petualangan 3D interaktif untuk siswa SD dengan kuis Mystery Box, tiga level progresif, audio adaptif, dan podium pemenang.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
