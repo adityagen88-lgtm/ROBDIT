@@ -56,6 +56,7 @@ export default function App() {
   const [playerName, setPlayerName] = useState('Bima Kelas 5A');
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarId>('Rimbi');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authNeedsReload, setAuthNeedsReload] = useState(false);
 
   const [room, setRoom] = useState<ServerRoomSnapshot>(INITIAL_ROOM);
   const [nearestBoxId, setNearestBoxId] = useState<string | null>(null);
@@ -265,9 +266,15 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        redirect: 'manual',
         body: JSON.stringify({ clientId, type, payload }),
       })
         .then(async (res) => {
+          const contentType = res.headers.get('content-type') || '';
+          if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
+            setAuthNeedsReload(true);
+            return;
+          }
           if (!res.ok) {
             if (res.status === 404) {
               setIsConnected(false);
@@ -278,6 +285,7 @@ export default function App() {
             }
             return;
           }
+          if (!contentType.includes('application/json')) return;
           const data = (await res.json()) as {
             ok?: boolean;
             events?: Array<{ type: string; payload?: Record<string, unknown> }>;
@@ -364,9 +372,16 @@ export default function App() {
         try {
           const res = await fetch(
             `/api/client/poll?clientId=${encodeURIComponent(httpClientIdRef.current)}`,
-            { credentials: 'same-origin' }
+            { credentials: 'same-origin', redirect: 'manual' }
           );
-          if (!res.ok) throw new Error('HTTP poll failed');
+          const contentType = res.headers.get('content-type') || '';
+          if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
+            setAuthNeedsReload(true);
+            return;
+          }
+          if (!res.ok || !contentType.includes('application/json')) {
+            throw new Error('HTTP poll failed');
+          }
           const data = (await res.json()) as {
             ok?: boolean;
             expired?: boolean;
@@ -415,8 +430,16 @@ export default function App() {
         const res = await fetch('/api/client/connect', {
           method: 'POST',
           credentials: 'same-origin',
+          redirect: 'manual',
         });
-        if (!res.ok) throw new Error('HTTP connect failed');
+        if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
+          setAuthNeedsReload(true);
+          return;
+        }
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) {
+          throw new Error('HTTP connect failed');
+        }
         const data = (await res.json()) as {
           ok?: boolean;
           clientId?: string;
@@ -428,6 +451,7 @@ export default function App() {
           httpClientIdRef.current = data.clientId;
         }
         transportRef.current = 'http';
+        setAuthNeedsReload(false);
         if (data.snapshot) setRoom(data.snapshot);
         setIsConnected(true);
         scheduleHttpPoll();
@@ -635,6 +659,7 @@ export default function App() {
   ) => {
     setIsSubmitting(true);
     setAuthError(null);
+    setAuthNeedsReload(false);
 
     if (transportRef.current === 'ws' && wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type, payload }));
@@ -643,41 +668,97 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/client/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          clientId: httpClientIdRef.current || '',
-          type,
-          payload,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let lastIssue: 'warmup' | 'network' | string = 'network';
 
-      const data = (await res.json()) as {
-        ok?: boolean;
-        clientId?: string;
-        events?: Array<{ type: string; payload?: Record<string, unknown> }>;
-        snapshot?: ServerRoomSnapshot;
-      };
-
-      if (data.clientId) {
-        httpClientIdRef.current = data.clientId;
-        transportRef.current = 'http';
-        setIsConnected(true);
-        startHttpPollRef.current?.();
-      }
-      if (data.snapshot) {
-        setRoom(data.snapshot);
-      }
-      if (Array.isArray(data.events)) {
-        for (const ev of data.events) {
-          handleServerEvent(ev.type, ev.payload || {});
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => window.setTimeout(r, 750));
+          if (transportRef.current === 'ws' && wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type, payload }));
+            window.setTimeout(() => setIsSubmitting(false), 3000);
+            return;
+          }
         }
+
+        const res = await fetch('/api/client/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          redirect: 'manual',
+          body: JSON.stringify({
+            clientId: httpClientIdRef.current || '',
+            type,
+            payload,
+          }),
+        });
+
+        if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
+          setAuthNeedsReload(true);
+          setAuthError(
+            'Sesi akses preview perlu disegarkan atau cookie browser diblokir. Klik "Muat Ulang Halaman" atau buka aplikasi di tab baru.'
+          );
+          return;
+        }
+
+        const contentType = res.headers.get('content-type') || '';
+        if (
+          res.status === 502 ||
+          res.status === 503 ||
+          res.status === 504 ||
+          contentType.includes('text/html')
+        ) {
+          lastIssue = 'warmup';
+          continue;
+        }
+
+        if (!res.ok) {
+          lastIssue = `HTTP ${res.status}`;
+          throw new Error(lastIssue);
+        }
+
+        const data = (await res.json()) as {
+          ok?: boolean;
+          clientId?: string;
+          events?: Array<{ type: string; payload?: Record<string, unknown> }>;
+          snapshot?: ServerRoomSnapshot;
+        };
+
+        if (data.clientId) {
+          httpClientIdRef.current = data.clientId;
+          transportRef.current = 'http';
+          setIsConnected(true);
+          startHttpPollRef.current?.();
+        }
+        if (data.snapshot) {
+          setRoom(data.snapshot);
+        }
+        if (Array.isArray(data.events)) {
+          for (const ev of data.events) {
+            handleServerEvent(ev.type, ev.payload || {});
+          }
+        }
+        return;
       }
-    } catch {
-      setAuthError('Belum berhasil terhubung ke server. Periksa koneksi lalu klik lagi.');
+
+      if (lastIssue === 'warmup') {
+        setAuthNeedsReload(true);
+        setAuthError(
+          'Server masih sedang memulai ulang. Tunggu beberapa detik lalu klik lagi atau muat ulang halaman.'
+        );
+      } else {
+        setAuthNeedsReload(true);
+        setAuthError('Belum berhasil terhubung ke server. Muat ulang halaman atau buka di tab baru.');
+      }
+    } catch (err) {
+      setAuthNeedsReload(true);
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        setAuthError('Perangkat sedang offline. Periksa koneksi internet Anda lalu coba lagi.');
+      } else {
+        const detail = err instanceof Error && err.message.startsWith('HTTP ') ? ` (${err.message})` : '';
+        setAuthError(
+          `Belum berhasil terhubung ke server${detail}. Klik "Muat Ulang Halaman" atau buka aplikasi di tab baru.`
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -747,7 +828,11 @@ export default function App() {
           isConnected={isConnected}
           isSubmitting={isSubmitting}
           authError={authError}
-          onClearAuthError={() => setAuthError(null)}
+          authNeedsReload={authNeedsReload}
+          onClearAuthError={() => {
+            setAuthError(null);
+            setAuthNeedsReload(false);
+          }}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
         />

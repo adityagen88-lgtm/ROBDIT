@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AVATAR_PRESETS, GAME_CONSTANTS, LEVEL_CONFIGS } from '../game/config';
 import { AvatarId } from '../game/types';
-import { Compass, GraduationCap, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
+import { Compass, ExternalLink, GraduationCap, RefreshCw, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 
 interface LobbyOverlayProps {
   playerName: string;
@@ -14,6 +14,7 @@ interface LobbyOverlayProps {
   isConnected: boolean;
   isSubmitting: boolean;
   authError: string | null;
+  authNeedsReload?: boolean;
   onClearAuthError: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
@@ -30,6 +31,7 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
   isConnected,
   isSubmitting,
   authError,
+  authNeedsReload = false,
   onClearAuthError,
   isMuted,
   onToggleMute,
@@ -108,8 +110,29 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
         </div>
 
         {authError && (
-          <div className="mb-4 px-4 py-3 rounded-xl bg-rose-950 border border-rose-500 text-rose-100 text-xs font-medium">
-            {authError}
+          <div className="mb-4 px-4 py-3 rounded-xl bg-rose-950 border border-rose-500 text-rose-100 text-xs font-medium space-y-2.5">
+            <p className="leading-relaxed">{authError}</p>
+            {authNeedsReload && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Muat Ulang Halaman</span>
+                </button>
+                <a
+                  href={typeof window !== 'undefined' ? window.location.href : '/'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-rose-400/50 hover:bg-slate-800 text-rose-100 font-semibold transition-colors whitespace-nowrap"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Buka di Tab Baru</span>
+                </a>
+              </div>
+            )}
           </div>
         )}
 
