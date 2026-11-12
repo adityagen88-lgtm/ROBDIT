@@ -1,4 +1,4 @@
-import { QuizQuestion } from './types';
+import type { QuizQuestion } from './types.ts';
 
 export const QUESTION_BANK: Record<1 | 2 | 3, QuizQuestion[]> = {
   1: [

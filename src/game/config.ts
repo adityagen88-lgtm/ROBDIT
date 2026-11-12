@@ -1,4 +1,4 @@
-import { AvatarId, AvatarPreset, LevelConfig } from './types';
+import type { AvatarId, AvatarPreset, LevelConfig } from './types.ts';
 
 export const GAME_CONSTANTS = {
   WRONG_ANSWER_COOLDOWN_SECONDS: 4,
