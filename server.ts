@@ -814,7 +814,7 @@ async function startServer() {
   });
 
   // HTTP fallback transport endpoints (ensures instant connectivity even if WebSocket upgrades are blocked by proxy/iframe)
-  app.post('/api/client/connect', (_req, res) => {
+  const handleHttpConnect = (_req: express.Request, res: express.Response) => {
     const clientId = `http-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     clients.set(clientId, {
       id: clientId,
@@ -827,7 +827,9 @@ async function startServer() {
       clientId,
       snapshot: buildSnapshot(),
     });
-  });
+  };
+  app.get('/api/client/connect', handleHttpConnect);
+  app.post('/api/client/connect', handleHttpConnect);
 
   app.get('/api/client/poll', (req, res) => {
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId : '';
@@ -855,7 +857,7 @@ async function startServer() {
       type?: string;
       payload?: Record<string, unknown>;
     };
-    const clientId = typeof body.clientId === 'string' ? body.clientId : '';
+    let clientId = typeof body.clientId === 'string' ? body.clientId : '';
     const type = typeof body.type === 'string' ? body.type : '';
     const payload = (body.payload && typeof body.payload === 'object' ? body.payload : {}) as Record<
       string,
@@ -863,13 +865,24 @@ async function startServer() {
     >;
 
     if (!clientId || !clients.has(clientId)) {
-      res.status(404).json({ ok: false, expired: true });
-      return;
+      if (type === 'auth:login_student' || type === 'auth:login_admin') {
+        clientId = `http-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        clients.set(clientId, {
+          id: clientId,
+          transport: 'http',
+          queue: [],
+          lastSeenAt: Date.now(),
+        });
+      } else {
+        res.status(404).json({ ok: false, expired: true });
+        return;
+      }
     }
 
     handleClientMessage(clientId, type, payload);
     res.json({
       ok: true,
+      clientId,
       events: drainClientQueue(clientId),
       snapshot: buildSnapshot(),
     });

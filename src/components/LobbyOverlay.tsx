@@ -12,6 +12,7 @@ interface LobbyOverlayProps {
   onLoginAdmin: (pin: string) => void;
   waitingCount: number;
   isConnected: boolean;
+  isSubmitting: boolean;
   authError: string | null;
   onClearAuthError: () => void;
   isMuted: boolean;
@@ -27,6 +28,7 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
   onLoginAdmin,
   waitingCount,
   isConnected,
+  isSubmitting,
   authError,
   onClearAuthError,
   isMuted,
@@ -43,13 +45,13 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
 
   const handleStudentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isConnected) return;
+    if (isSubmitting) return;
     onLoginStudent();
   };
 
   const handleAdminSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isConnected) return;
+    if (isSubmitting) return;
     onLoginAdmin(adminPin);
   };
 
@@ -179,17 +181,19 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
             </div>
 
             <div className="text-xs text-slate-400 tabular-nums">
-              {waitingCount > 0
-                ? `${waitingCount} siswa sudah berada di Ruang Tunggu`
-                : 'Belum ada siswa di Ruang Tunggu'}
+              {isConnected
+                ? waitingCount > 0
+                  ? `${waitingCount} siswa sudah berada di Ruang Tunggu`
+                  : 'Server siap · Belum ada siswa di Ruang Tunggu'
+                : 'Klik tombol di bawah untuk langsung terhubung ke server'}
             </div>
 
             <button
               type="submit"
-              disabled={!isConnected}
-              className="w-full min-h-12 px-6 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap"
+              disabled={isSubmitting}
+              className="w-full min-h-12 px-6 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:bg-amber-500/70 text-slate-950 font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              {isConnected ? 'Gabung Ruang Tunggu' : 'Menghubungkan ke Server...'}
+              {isSubmitting ? 'Sedang Masuk...' : 'Gabung Ruang Tunggu'}
             </button>
           </form>
         ) : (
@@ -223,15 +227,17 @@ export const LobbyOverlay: React.FC<LobbyOverlayProps> = ({
             </div>
 
             <div className="text-xs text-slate-400 tabular-nums">
-              {waitingCount} siswa terhubung saat ini
+              {isConnected
+                ? `${waitingCount} siswa terhubung saat ini`
+                : 'Klik tombol di bawah untuk langsung masuk ke Panel Guru'}
             </div>
 
             <button
               type="submit"
-              disabled={!isConnected}
-              className="w-full min-h-12 px-6 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap"
+              disabled={isSubmitting}
+              className="w-full min-h-12 px-6 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:bg-amber-500/70 text-slate-950 font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              {isConnected ? 'Masuk sebagai Admin' : 'Menghubungkan ke Server...'}
+              {isSubmitting ? 'Sedang Masuk...' : 'Masuk sebagai Admin'}
             </button>
           </form>
         )}

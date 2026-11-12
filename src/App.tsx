@@ -47,8 +47,10 @@ export default function App() {
   const httpClientIdRef = useRef<string | null>(null);
   const httpMoveBusyRef = useRef(false);
   const lastHttpMoveAtRef = useRef(0);
+  const startHttpPollRef = useRef<(() => void) | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [role, setRole] = useState<UserRole | null>(null);
   const [localPlayerId, setLocalPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState('Bima Kelas 5A');
@@ -129,12 +131,15 @@ export default function App() {
         case 'auth:accepted': {
           const acceptedRole = payload.role as UserRole;
           const pid = (payload.playerId as string | null) ?? null;
+          setIsSubmitting(false);
+          setIsConnected(true);
           setAuthError(null);
           setRole(acceptedRole);
           setLocalPlayerId(pid);
           break;
         }
         case 'auth:error': {
+          setIsSubmitting(false);
           setAuthError(String(payload.message || 'Gagal masuk.'));
           break;
         }
@@ -299,33 +304,38 @@ export default function App() {
     [handleServerEvent]
   );
 
-  // Mount Three.js Arena Engine once inside isolated container
+  // Mount Three.js Arena Engine once inside isolated container (fail-safe if WebGL unavailable)
   useEffect(() => {
     const container = canvasContainerRef.current;
     if (!container) return;
 
-    const engine = new ThreeArenaEngine(
-      container,
-      {
-        onNearestBoxChange: (boxId) => {
-          setNearestBoxId(boxId);
+    let engine: ThreeArenaEngine | null = null;
+    try {
+      engine = new ThreeArenaEngine(
+        container,
+        {
+          onNearestBoxChange: (boxId) => {
+            setNearestBoxId(boxId);
+          },
+          onLocalPlayerMove: (move) => {
+            if (roleRef.current === 'student') {
+              sendWs('player:move', move);
+            }
+          },
+          onRadarUpdate: (snapshot) => {
+            setRadar(snapshot);
+          },
         },
-        onLocalPlayerMove: (move) => {
-          if (roleRef.current === 'student') {
-            sendWs('player:move', move);
-          }
-        },
-        onRadarUpdate: (snapshot) => {
-          setRadar(snapshot);
-        },
-      },
-      'Rimbi',
-      'Bima Kelas 5A'
-    );
-    engineRef.current = engine;
+        'Rimbi',
+        'Bima Kelas 5A'
+      );
+      engineRef.current = engine;
+    } catch (err) {
+      console.error('3D Arena init fallback:', err);
+    }
 
     return () => {
-      engine.dispose();
+      engine?.dispose();
       engineRef.current = null;
       soundService.dispose();
     };
@@ -391,9 +401,16 @@ export default function App() {
     };
 
     const isWsActive = () => transportRef.current === 'ws';
+    startHttpPollRef.current = scheduleHttpPoll;
 
     const connectHttp = async () => {
       if (closedByCleanup || isWsActive()) return;
+      if (httpClientIdRef.current) {
+        transportRef.current = 'http';
+        setIsConnected(true);
+        scheduleHttpPoll();
+        return;
+      }
       try {
         const res = await fetch('/api/client/connect', {
           method: 'POST',
@@ -407,7 +424,9 @@ export default function App() {
         };
         if (closedByCleanup || isWsActive() || !data.clientId) return;
 
-        httpClientIdRef.current = data.clientId;
+        if (!httpClientIdRef.current) {
+          httpClientIdRef.current = data.clientId;
+        }
         transportRef.current = 'http';
         if (data.snapshot) setRoom(data.snapshot);
         setIsConnected(true);
@@ -610,11 +629,64 @@ export default function App() {
     [sendWs]
   );
 
+  const submitAuthWithFallback = async (
+    type: 'auth:login_student' | 'auth:login_admin',
+    payload: Record<string, unknown>
+  ) => {
+    setIsSubmitting(true);
+    setAuthError(null);
+
+    if (transportRef.current === 'ws' && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type, payload }));
+      window.setTimeout(() => setIsSubmitting(false), 3000);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/client/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          clientId: httpClientIdRef.current || '',
+          type,
+          payload,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = (await res.json()) as {
+        ok?: boolean;
+        clientId?: string;
+        events?: Array<{ type: string; payload?: Record<string, unknown> }>;
+        snapshot?: ServerRoomSnapshot;
+      };
+
+      if (data.clientId) {
+        httpClientIdRef.current = data.clientId;
+        transportRef.current = 'http';
+        setIsConnected(true);
+        startHttpPollRef.current?.();
+      }
+      if (data.snapshot) {
+        setRoom(data.snapshot);
+      }
+      if (Array.isArray(data.events)) {
+        for (const ev of data.events) {
+          handleServerEvent(ev.type, ev.payload || {});
+        }
+      }
+    } catch {
+      setAuthError('Belum berhasil terhubung ke server. Periksa koneksi lalu klik lagi.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleLoginStudent = () => {
     soundService.unlock();
-    setAuthError(null);
     engineRef.current?.setPlayerIdentity(playerName, selectedAvatar);
-    sendWs('auth:login_student', {
+    void submitAuthWithFallback('auth:login_student', {
       name: playerName,
       avatarId: selectedAvatar,
     });
@@ -622,8 +694,7 @@ export default function App() {
 
   const handleLoginAdmin = (pin: string) => {
     soundService.unlock();
-    setAuthError(null);
-    sendWs('auth:login_admin', { pin });
+    void submitAuthWithFallback('auth:login_admin', { pin });
   };
 
   const handleLogout = () => {
@@ -674,6 +745,7 @@ export default function App() {
           onLoginAdmin={handleLoginAdmin}
           waitingCount={room.players.length}
           isConnected={isConnected}
+          isSubmitting={isSubmitting}
           authError={authError}
           onClearAuthError={() => setAuthError(null)}
           isMuted={isMuted}
